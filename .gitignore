@@ -1,0 +1,11 @@
+# Simulation artifacts
+*.vvp
+*.vcd
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+*.swp
