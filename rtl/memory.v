@@ -14,10 +14,6 @@ module memory (
     initial begin
         for (i = 0; i < 1024; i = i + 1)
             mem[i] = 32'b0;
-
-        // Load hex instructions into memory array
-        $readmemh("program.hex", mem, 0, 4);
-        $display("Memory initialized from program.hex");
     end
 
     wire [9:0]  word_addr   = addr[11:2];

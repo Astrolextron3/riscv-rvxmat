@@ -1,127 +1,106 @@
-// top_single.v - Single-Cycle RISC-V Top Level Module
-
 module top_single (
-    input  wire        clk,
-    input  wire        rst
+    input         clk,
+    input         rst,
+    output [31:0] pc_out,
+    output [31:0] alu_result_out,
+    output [31:0] reg_out
 );
 
-    // ------------------------------------------------------------------------
-    // Internal Signals & Wires
-    // ------------------------------------------------------------------------
-    reg  [31:0] pc;
-    wire [31:0] next_pc;
-    wire [31:0] pc_plus_4;
-    wire [31:0] pc_target;
-
-    wire [31:0] instr;
-
-    // Control Signals
-    wire        reg_write;
-    wire        alu_src;
-    wire        mem_read;
-    wire        mem_write;
-    wire        mem_to_reg;
-    wire        branch;
-    wire        jump;
-    wire [3:0]  alu_ctrl;
-
-    // Register File Wires
-    wire [31:0] reg_read_data1;
-    wire [31:0] reg_read_data2;
-    wire [31:0] reg_write_data;
-
-    // Immediate & ALU Wires
-    wire [31:0] imm;
-    wire [31:0] alu_operand_b;
-    wire [31:0] alu_result;
-    wire        alu_zero;
-
-    // Memory Read Data
-    wire [31:0] mem_read_data;
-
-    // ------------------------------------------------------------------------
-    // Program Counter (PC) Register & Next-PC Logic
-    // ------------------------------------------------------------------------
-    assign pc_plus_4 = pc + 32'd4;
-    assign pc_target = pc + imm;
-    assign next_pc   = (jump || (branch && alu_zero)) ? pc_target : pc_plus_4;
+    // ── Program Counter ────────────────────────────────────
+    reg [31:0] pc;
 
     always @(posedge clk or posedge rst) begin
-        if (rst)
-            pc <= 32'b0;
-        else
-            pc <= next_pc;
+        if (rst) pc <= 32'hFFFFFFFC; // start at -4 so first instruction is at 0
+        else     pc <= pc + 4;
     end
 
-    // ------------------------------------------------------------------------
-    // Submodule Instantiations
-    // ------------------------------------------------------------------------
+    // ── Instruction Memory ─────────────────────────────────
+    reg [31:0] imem [0:255];
+    initial begin
+        $readmemh("program.hex", imem);
+        $display("Memory initialized from program.hex");
+    end
 
-    // Instruction Memory Instance
-    memory instruction_mem (
-        .clk       (clk),
-        .mem_read  (1'b1),
-        .mem_write (1'b0),
-        .funct3    (3'b010),        // LW mode to read full 32-bit instructions
-        .addr      (pc),
-        .write_data(32'b0),
-        .read_data (instr)
+    wire [31:0] instr = imem[pc[9:2]];
+
+    // ── Instruction fields ─────────────────────────────────
+    wire [4:0] rd     = instr[11:7];
+    wire [4:0] rs1    = instr[19:15];
+    wire [4:0] rs2    = instr[24:20];
+    wire [2:0] funct3 = instr[14:12];
+
+    // ── Decoder ────────────────────────────────────────────
+    wire        reg_write, alu_src, mem_write, mem_read;
+    wire        mem_to_reg, branch, jump;
+    wire [3:0]  alu_ctrl;
+
+    decoder dec (
+        .instr      (instr),
+        .reg_write  (reg_write),
+        .alu_src    (alu_src),
+        .mem_write  (mem_write),
+        .mem_read   (mem_read),
+        .mem_to_reg (mem_to_reg),
+        .branch     (branch),
+        .jump       (jump),
+        .alu_ctrl   (alu_ctrl)
     );
 
-    // Decoder / Control Unit Instance
-    decoder control_unit (
-        .instr     (instr),
-        .reg_write (reg_write),
-        .alu_src   (alu_src),
-        .mem_read  (mem_read),
-        .mem_write (mem_write),
-        .mem_to_reg(mem_to_reg),
-        .branch    (branch),
-        .jump      (jump),
-        .alu_ctrl  (alu_ctrl)
+    // ── Immediate Generator ────────────────────────────────
+    wire [31:0] imm;
+
+    imm_gen ig (
+        .instr (instr),
+        .imm   (imm)
     );
 
-    // Immediate Generator Instance
-    imm_gen immediate_generator (
-        .instr     (instr),
-        .imm       (imm)
+    // ── Register File ──────────────────────────────────────
+    wire [31:0] rd1, rd2;
+    wire [31:0] wb_data;
+
+    regfile rf (
+        .clk  (clk),
+        .we   (reg_write),
+        .rs1  (rs1),
+        .rs2  (rs2),
+        .rd   (rd),
+        .wd   (wb_data),
+        .rd1  (rd1),
+        .rd2  (rd2)
     );
 
-    // Register File Instance
-    regfile register_file (
-        .clk (clk),
-        .we  (reg_write),
-        .rs1 (instr[19:15]),
-        .rs2 (instr[24:20]),
-        .rd  (instr[11:7]),
-        .wd  (reg_write_data),
-        .rd1 (reg_read_data1),
-        .rd2 (reg_read_data2)
+    // ── ALU ───────────────────────────────────────────────
+    wire [31:0] alu_b = alu_src ? imm : rd2;
+    wire [31:0] alu_result;
+    wire        zero;
+
+    alu al (
+        .a        (rd1),
+        .b        (alu_b),
+        .alu_ctrl (alu_ctrl),
+        .result   (alu_result),
+        .zero     (zero)
     );
 
-    // ALU Execution Unit & Data Multiplexer
-    assign alu_operand_b = alu_src ? imm : reg_read_data2;
+    // ── Data Memory ────────────────────────────────────────
+    wire [31:0] mem_read_data;
 
-    alu alu_unit (
-        .a         (reg_read_data1),
-        .b         (alu_operand_b),
-        .alu_ctrl  (alu_ctrl),
-        .result    (alu_result),
-        .zero      (alu_zero)
+    memory mem (
+        .clk        (clk),
+        .mem_write  (mem_write),
+        .mem_read   (mem_read),
+        .funct3     (funct3),
+        .addr       (alu_result),
+        .write_data (rd2),
+        .read_data  (mem_read_data)
     );
 
-    // Data Memory Instance
-    memory data_mem (
-        .clk       (clk),
-        .mem_read  (mem_read),
-        .mem_write (mem_write),
-        .funct3    (instr[14:12]),  // Controls byte, halfword, and word access
-        .addr      (alu_result),
-        .write_data(reg_read_data2),
-        .read_data (mem_read_data)
-    );
+    // ── Writeback ──────────────────────────────────────────
+    assign wb_data = mem_to_reg ? mem_read_data : alu_result;
 
-    // Writeback Multiplexer
-    assign reg_write_data = mem_to_reg ? mem_read_data : alu_result;
+    // ── Outputs ────────────────────────────────────────────
+    assign pc_out         = pc;
+    assign alu_result_out = alu_result;
+    assign reg_out        = wb_data;
 
 endmodule
