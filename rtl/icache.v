@@ -1,5 +1,6 @@
 module icache #(
-    parameter LINES = 32
+    parameter LINES    = 32,
+    parameter HEX_FILE = "program.hex"
 )(
     input         clk, rst,
     input  [31:0] addr,
@@ -8,40 +9,34 @@ module icache #(
     output reg    hit,
     output reg    miss
 );
-    reg        valid [0:LINES-1];
-    reg [22:0] tags  [0:LINES-1];
-    reg [31:0] cache [0:LINES*4-1];
+    reg       valid [0:LINES-1];
+    reg [7:0] tags  [0:LINES-1];
+    reg [31:0] cache [0:LINES-1];
 
     reg [31:0] mem [0:255];
-    initial $readmemh("program.hex", mem);
+    initial $readmemh(HEX_FILE, mem);
 
-    wire [4:0]  index = addr[8:4];
-    wire [1:0]  word_offset = addr[3:2];
-    wire [22:0] tag   = addr[31:9];
-    wire [7:0]  line_base = {addr[9:4], 2'b00};
+    wire [4:0] index = addr[6:2];
+    wire [7:0] tag   = addr[14:7];
 
-    integer i, word;
+    integer i;
     initial begin
         for (i = 0; i < LINES; i = i + 1) begin
             valid[i] = 1'b0;
-            tags[i]  = 25'b0;
-            for (word = 0; word < 4; word = word + 1)
-                cache[i * 4 + word] = 32'b0;
+            tags[i]  = 8'b0;
+            cache[i] = 32'b0;
         end
     end
 
-    // combinational read
     assign data_out = (valid[index] && tags[index] == tag) ?
-                      cache[index * 4 + word_offset] : mem[addr[9:2]];
+                      cache[index] : mem[addr[9:2]];
 
-    // synchronous update of cache state
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             for (i = 0; i < LINES; i = i + 1) begin
                 valid[i] <= 1'b0;
-                tags[i]  <= 25'b0;
-                for (word = 0; word < 4; word = word + 1)
-                    cache[i * 4 + word] <= 32'b0;
+                tags[i]  <= 8'b0;
+                cache[i] <= 32'b0;
             end
             hit  <= 1'b0;
             miss <= 1'b0;
@@ -50,8 +45,7 @@ module icache #(
                 hit  <= 1'b1;
                 miss <= 1'b0;
             end else begin
-                for (word = 0; word < 4; word = word + 1)
-                    cache[index * 4 + word] <= mem[line_base + word];
+                cache[index] <= mem[addr[9:2]];
                 tags[index]  <= tag;
                 valid[index] <= 1'b1;
                 hit          <= 1'b0;
