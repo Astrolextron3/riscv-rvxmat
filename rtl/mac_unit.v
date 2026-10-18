@@ -6,7 +6,12 @@ module mac_unit (
     output [31:0] result
 );
     reg  [63:0] accumulator;
-    wire [63:0] next_acc = accumulator + ($signed(a) * $signed(b));
+
+    // Signed 32x32 -> 64 product, kept in its own signed 64-bit net so the operands
+    // are sign-extended (mixing an unsigned accumulator into the same expression
+    // would make Verilog treat the whole thing as unsigned).
+    wire signed [63:0] product  = $signed(a) * $signed(b);
+    wire        [63:0] next_acc = accumulator + product;
 
     // result is what the accumulator WILL hold after this cycle, so a VMAC/VCLR
     // that writes back to rd gets the up-to-date value in the same cycle.

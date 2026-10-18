@@ -1,4 +1,6 @@
 module ex_stage (
+    input         clk, rst,
+    input         ex_mac_en, ex_clr_en,
     input  [31:0] ex_rd1, ex_rd2, ex_imm,
     input  [31:0] ex_pc,
     input  [3:0]  ex_alu_ctrl,
@@ -32,15 +34,35 @@ module ex_stage (
 
     wire [31:0] alu_b = ex_alu_src ? ex_imm : alu_b_reg;
 
+    wire [31:0] alu_result_int;
+    wire [31:0] mac_result;
+
     alu al (
         .a        (alu_a),
         .b        (alu_b),
         .alu_ctrl (ex_alu_ctrl),
-        .result   (ex_alu_result),
+        .result   (alu_result_int),
         .zero     (ex_zero)
     );
+
+    // RVX-MAT: VMAC/VCLR execute here. Operands are the FORWARDED register values
+    // (alu_a / alu_b_reg), never the immediate. The accumulator updates at the end
+    // of the EX cycle, so back-to-back VMACs need no stall. mac_result is the value
+    // the accumulator is about to hold; it travels down the pipe as the "ALU result"
+    // and is therefore forwarded to later instructions by the existing forwarding unit.
+    mac_unit MAC (
+        .clk    (clk),
+        .rst    (rst),
+        .a      (alu_a),
+        .b      (alu_b_reg),
+        .mac_en (ex_mac_en),
+        .clr_en (ex_clr_en),
+        .result (mac_result)
+    );
+
+    assign ex_alu_result = (ex_mac_en | ex_clr_en) ? mac_result : alu_result_int;
 
     assign ex_rd2_out      = alu_b_reg;
     assign ex_branch_target = ex_pc + (ex_imm << 1);
 
-endmodule
+endmodule

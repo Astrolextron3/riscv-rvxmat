@@ -1,4 +1,6 @@
-module if_stage (
+module if_stage #(
+    parameter HEX_FILE = "program.hex"
+) (
     input         clk, rst,
     input         stall,
     input         pc_src,
@@ -7,7 +9,7 @@ module if_stage (
     output [31:0] if_instr
 );
     reg [31:0] imem [0:255];
-    initial $readmemh("program.hex", imem);
+    initial $readmemh(HEX_FILE, imem);
 
     always @(posedge clk or posedge rst) begin
         if (rst)
@@ -18,4 +20,4 @@ module if_stage (
 
     assign if_instr = imem[if_pc[9:2]];
 
-endmodule
+endmodule

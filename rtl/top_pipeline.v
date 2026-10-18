@@ -1,4 +1,6 @@
-module top_pipeline (
+module top_pipeline #(
+    parameter HEX_FILE = "program.hex"
+) (
     input         clk, rst,
     output [31:0] pc_out
 );
@@ -17,6 +19,7 @@ module top_pipeline (
     wire        id_mem_write, id_mem_read;
     wire        id_mem_to_reg, id_branch, id_jump;
     wire [3:0]  id_alu_ctrl;
+    wire        id_mac_en, id_clr_en;
 
     // ID/EX register outputs
     wire [31:0] ex_pc, ex_rd1, ex_rd2, ex_imm;
@@ -25,6 +28,7 @@ module top_pipeline (
     wire        ex_alu_src, ex_mem_write, ex_mem_read;
     wire        ex_mem_to_reg, ex_reg_write;
     wire [2:0]  ex_funct3;
+    wire        ex_mac_en, ex_clr_en;
 
     // EX stage outputs
     wire [31:0] ex_alu_result, ex_rd2_out;
@@ -56,12 +60,16 @@ module top_pipeline (
     wire [31:0] branch_target;
     wire [1:0]  fwd_a, fwd_b;
 
-    wire if_id_flush = if_id_flush_hz | id_ex_flush_br;
-    wire id_ex_flush = id_ex_flush_br;
+    // Branch/jump: squash the wrong-path instructions in IF/ID and ID/EX.
+    // Load-use stall: hold PC and IF/ID (stall input) and insert a bubble into ID/EX.
+    // (The hazard unit's own if_id_flush used to flush IF/ID on a stall as well, which
+    //  threw away the consumer instruction; it is intentionally no longer used.)
+    wire if_id_flush = id_ex_flush_br;
+    wire id_ex_flush = id_ex_flush_br | stall;
 
     // ── Instantiations ─────────────────────────────────────
 
-    if_stage IF (
+    if_stage #(.HEX_FILE(HEX_FILE)) IF (
         .clk           (clk),
         .rst           (rst),
         .stall         (stall),
@@ -103,7 +111,9 @@ module top_pipeline (
         .id_mem_to_reg(id_mem_to_reg),
         .id_branch    (id_branch),
         .id_jump      (id_jump),
-        .id_alu_ctrl  (id_alu_ctrl)
+        .id_alu_ctrl  (id_alu_ctrl),
+        .id_mac_en    (id_mac_en),
+        .id_clr_en    (id_clr_en)
     );
 
     id_ex_reg ID_EX (
@@ -124,6 +134,8 @@ module top_pipeline (
         .id_mem_to_reg(id_mem_to_reg),
         .id_reg_write (id_reg_write),
         .id_funct3    (id_funct3),
+        .id_mac_en    (id_mac_en),
+        .id_clr_en    (id_clr_en),
         .ex_pc        (ex_pc),
         .ex_rd1       (ex_rd1),
         .ex_rd2       (ex_rd2),
@@ -137,10 +149,16 @@ module top_pipeline (
         .ex_mem_read  (ex_mem_read),
         .ex_mem_to_reg(ex_mem_to_reg),
         .ex_reg_write (ex_reg_write),
-        .ex_funct3    (ex_funct3)
+        .ex_funct3    (ex_funct3),
+        .ex_mac_en    (ex_mac_en),
+        .ex_clr_en    (ex_clr_en)
     );
 
     ex_stage EX (
+        .clk              (clk),
+        .rst              (rst),
+        .ex_mac_en        (ex_mac_en),
+        .ex_clr_en        (ex_clr_en),
         .ex_rd1           (ex_rd1),
         .ex_rd2           (ex_rd2),
         .ex_imm           (ex_imm),
@@ -246,4 +264,4 @@ module top_pipeline (
 
     assign pc_out = if_pc;
 
-endmodule
+endmodule
